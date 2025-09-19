@@ -1,4 +1,5 @@
 from Crypto.Util.Padding import pad,unpad
+from argparse import ArgumentParser
 from Crypto.Cipher import AES
 from base64 import b64encode
 from hashlib import sha256
@@ -38,12 +39,11 @@ def decrypt_message(ciphertext:bytes,key:bytes,iv:bytes)->str:
 	decrypted=cipher.decrypt(ciphertext)
 	return unpad(decrypted,AES.block_size).decode(errors='ignore')
 
-def hide_data(img_path,message,key_str,iv_str,start_marker_bin,end_marker_bin,output_path):
+def hide_data(img_path,key_str,iv_str,start_marker_bin,end_marker_bin,message,output_path):
 	if len(key_str)!=32 or len(iv_str)!=16:print('error: key must be 32 chars and iv 16 chars');return
 	key=key_str.encode()
 	iv=iv_str.encode()
 	encrypted=encrypt_message(message,key,iv)
-	#print('debug encrypted message (base64):',b64encode(encrypted).decode())
 	start_len_bin=int_to_nbits(len(start_marker_bin),16)
 	end_len_bin=int_to_nbits(len(end_marker_bin),16)
 	data_bin=start_len_bin+start_marker_bin+to_bin(encrypted)+end_len_bin+end_marker_bin
@@ -57,19 +57,18 @@ def hide_data(img_path,message,key_str,iv_str,start_marker_bin,end_marker_bin,ou
 	positions=derive_positions(data_len,max_bits,key+iv)
 	for i,(bit_pos,channel_order) in enumerate(positions):	# apply lsb
 		pixel_index=bit_pos//3
-		color_channel=bit_pos%3  # select a rgb channel
+		color_channel=bit_pos%3	# select a rgb channel
 		x=pixel_index%width
 		y=pixel_index//width
 		r,g,b=pixels[x,y]
 		channels=[r,g,b]
-		permuted=[channels[channel_order[0]],channels[channel_order[1]],channels[channel_order[2]]]  # but the channel is unknown
+		permuted=[channels[channel_order[0]],channels[channel_order[1]],channels[channel_order[2]]]	# rgb permutation to shuffle channels
 		old_bit=permuted[color_channel]&1
 		new_bit=int(data_bin[i])
 		permuted[color_channel]=(permuted[color_channel]&~1)|new_bit
-		final_channels=[0,0,0]  # undo permutation
+		final_channels=[0,0,0]	# undo permutation
 		for idx,val in enumerate(channel_order):final_channels[val]=permuted[idx]
 		pixels[x,y]=tuple(final_channels)
-		#print(f'hide - pixel ({x},{y}): original={{r:{r}, g:{g}, b:{b}}}, permuted={{r:{permuted[0]}, g:{permuted[1]}, b:{permuted[2]}}}, channel_order={channel_order}, color_channel={color_channel}, old_bit={old_bit}, new_bit={new_bit}')  # print to debug
 	img.save(output_path)
 	print(f'message hidden in "{output_path}"')
 
@@ -94,7 +93,6 @@ def extract_data(img_path,key_str,iv_str,start_marker_bin,end_marker_bin):
 		permuted=[channels[channel_order[0]],channels[channel_order[1]],channels[channel_order[2]]]
 		bit=permuted[color_channel]&1
 		bits_collected.append(str(bit))
-		#print(f'extract - pixel ({x},{y}): original={{r:{r}, g:{g}, b:{b}}}, permuted={{r:{permuted[0]}, g:{permuted[1]}, b:{permuted[2]}}}, channel_order={channel_order}, color_channel={color_channel}, bit={bit}')
 	binary_str=''.join(bits_collected)
 	if len(binary_str)<16:print('error: not enough data to read start marker length');return
 	start_len=bits_to_int(binary_str[:16])
@@ -126,17 +124,21 @@ def extract_data(img_path,key_str,iv_str,start_marker_bin,end_marker_bin):
 	print('error: could not extract a valid message with any end marker found')
 
 def main():
-	if len(argv)<2:print('usage:');print('hide: python lsbstego.py hide <input_image> <message> <key32> <iv16> <start_marker_bin> <end_marker_bin> <output_image>');print('extract: python lsbstego.py extract <image_with_message> <key32> <iv16> <start_marker_bin> <end_marker_bin>');return
-	action=argv[1]
-	if action=='hide':
-		if len(argv)!=9:print('usage hide: python lsbstego.py hide <input_image> <message> <key32> <iv16> <start_marker_bin> <end_marker_bin> <output_image>');return
-		_,_,img_in,msg,key,iv,start_mark,end_mark,out_img=argv
-		hide_data(img_in,msg,key,iv,start_mark,end_mark,out_img)
-	elif action=='extract':
-		if len(argv)!=7:print('usage extract: python lsbstego.py extract <image_with_message> <key32> <iv16> <start_marker_bin> <end_marker_bin>');return
-		_,_,img_in,key,iv,start_mark,end_mark=argv
-		extract_data(img_in,key,iv,start_mark,end_mark)
-	else:print('error: unrecognized action. use "hide" or "extract"')
+	parser=ArgumentParser(description='hide aes256-cbc encrypted text in images using lsb stego',epilog='use lsbstego.py <argument> -h for more details')
+	subparsers=parser.add_subparsers(dest='command',required=True)
+	sparser=ArgumentParser(add_help=False)	# shared parser
+	sparser.add_argument('image',help='path to image file')
+	sparser.add_argument('key',help='aes key (32 characters)')
+	sparser.add_argument('iv',help='initialization vector (16 characters)')
+	sparser.add_argument('start_marker',help='start marker (binary string)')
+	sparser.add_argument('end_marker',help='end marker (binary string)')
+	hparser=subparsers.add_parser('hide',parents=[sparser],help='hide a message in an image')
+	hparser.add_argument('message',help='message to hide')
+	hparser.add_argument('output',nargs='?',default='output.png',help='output image path (default: output.png)')
+	eparser=subparsers.add_parser('extract',parents=[sparser],help='extract a hidden message from an image')
+	args=parser.parse_args()
+	if args.command=='hide':hide_data(args.image,args.key,args.iv,args.start_marker,args.end_marker,args.message,args.output)
+	elif args.command=='extract':extract_data(args.image,args.key,args.iv,args.start_marker,args.end_marker)
 
 if __name__ == '__main__':main()
 	# by azuk4r
