@@ -1,0 +1,6 @@
+cffi==2.0.0
+numpy==2.3.4
+pycparser==2.23
+pycryptodome==3.23.0
+scipy==1.16.2
+soundfile==0.13.1
