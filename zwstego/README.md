@@ -59,7 +59,7 @@ python zwstego.py decode INPUT_FILE --key KEY --iv IV --file
 ```
 ### Notes
 - Files are automatically compressed before encryption except for already compressed formats
-- The 2‑character mode (`--bin`) uses U+2060 (Word Joiner) for bit 0 and U+200D (Zero Width Joiner) for bit 1
+- The 2‑character mode (`--bin`) uses U+2060 (Word Joiner) for bit 0 and U+200D (Zero Width Joiner) for bit 1. This mode is intended for platforms like X (Twitter) where several Zero-Width characters may be altered
 - The decoder ignores any visible text around the invisible characters, so the encoded string can be embedded in tweets or messages
 - KEY must be exactly 32 bytes (example: `X9fK2mP8qR4tY7wZ3nB6cD1eF0g2jKLm`) and IV 16 bytes (example: `A1b2C3d4E5f6G7h8`)
 ### Credits
