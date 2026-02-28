@@ -37,7 +37,7 @@ python lsbstego.py extract output.png MyNewSecretKeyForAES256Crypto123 InitVecto
 python lsbstego.py extract output.png MyNewSecretKeyForAES256Crypto123 InitVectorAES16b --file
 ```
 ### Notes
-- Files are automatically compressed before Base64 encoding except for already compressed formats
+- Files are automatically compressed before encryption except for already compressed formats
 - Uses LCG pixel shuffling and per-pixel RGB channel permutations with random channel selection to complicate analysis
 - The output needs to be lossless, like PNG or similar formats. Lossy formats like JPEG are fine for input if output is lossless
 - Extracting large files from high-resolution images requires significant RAM

@@ -1,6 +1,5 @@
 from os.path import exists,basename,splitext
 from Crypto.Util.Padding import pad,unpad
-from base64 import b64encode,b64decode
 from lzma import compress,decompress
 from argparse import ArgumentParser
 from Crypto.Cipher import AES
@@ -40,13 +39,19 @@ def derive_positions(length:int,max_pos:int,seed:bytes):
 			count+=1
 			if count>=length:return
 
-def encrypt_text(text:str,key:bytes,iv:bytes)->bytes:
+def encrypt_data(data:bytes,key:bytes,iv:bytes)->bytes:
 	cipher=AES.new(key,AES.MODE_CBC,iv)
-	return cipher.encrypt(pad(text.encode(),AES.block_size))
+	return cipher.encrypt(pad(data,AES.block_size))
+
+def decrypt_data(ciphertext:bytes,key:bytes,iv:bytes)->bytes:
+	cipher=AES.new(key,AES.MODE_CBC,iv)
+	return unpad(cipher.decrypt(ciphertext),AES.block_size)
+
+def encrypt_text(text:str,key:bytes,iv:bytes)->bytes:
+	return encrypt_data(text.encode('utf-8'),key,iv)
 
 def decrypt_text(ciphertext:bytes,key:bytes,iv:bytes)->str:
-	cipher=AES.new(key,AES.MODE_CBC,iv)
-	return unpad(cipher.decrypt(ciphertext),AES.block_size).decode(errors='ignore')
+	return decrypt_data(ciphertext,key,iv).decode('utf-8',errors='ignore')
 
 def set_pixel_bit(img,width,pixel_idx,channel_order,permuted_pos,bit):
 	x,y=pixel_idx%width,pixel_idx//width
@@ -58,11 +63,7 @@ def set_pixel_bit(img,width,pixel_idx,channel_order,permuted_pos,bit):
 	for idx,val in enumerate(channel_order):restored[val]=permuted[idx] 	# undo permutation
 	img.putpixel((x,y),tuple(restored))
 
-def hide_data(img_path,key_str,iv_str,text,output_path):
-	if len(key_str)!=32 or len(iv_str)!=16:print('error: key must be 32 chars and iv 16 chars');return
-	if splitext(output_path)[1].lower() in BAD_OUTPUT_EXTS:print(f'error: format "{splitext(output_path)[1]}" is not supported, use png or another lossless format');return
-	key,iv=key_str.encode(),iv_str.encode()
-	encrypted=encrypt_text(text,key,iv)
+def _embed_encrypted(encrypted:bytes,key:bytes,iv:bytes,img_path:str,output_path:str):
 	encrypted_bin=to_bin(encrypted)
 	encrypted_bin_len=len(encrypted_bin)
 	prefix=int_to_nbits(encrypted_bin_len,32)
@@ -71,9 +72,17 @@ def hide_data(img_path,key_str,iv_str,text,output_path):
 	width,height=img.size
 	max_bits=width*height*3
 	if len(data)>max_bits:print('error: data length exceeds image capacity');return
-	for i,(pixel_idx,channel_order,permuted_pos) in enumerate(derive_positions(len(data),max_bits,key+iv)):set_pixel_bit(img,width,pixel_idx,channel_order,permuted_pos,int(data[i]))
+	for i,(pixel_idx,channel_order,permuted_pos) in enumerate(derive_positions(len(data),max_bits,key+iv)):
+		set_pixel_bit(img,width,pixel_idx,channel_order,permuted_pos,int(data[i]))
 	img.save(output_path)
 	print(f'data hidden in "{output_path}"')
+
+def hide_data(img_path,key_str,iv_str,text,output_path):
+	if len(key_str)!=32 or len(iv_str)!=16:print('error: key must be 32 chars and iv 16 chars');return
+	if splitext(output_path)[1].lower() in BAD_OUTPUT_EXTS:print(f'error: format "{splitext(output_path)[1]}" is not supported, use png or another lossless format');return
+	key,iv=key_str.encode(),iv_str.encode()
+	encrypted=encrypt_text(text,key,iv)
+	_embed_encrypted(encrypted,key,iv,img_path,output_path)
 
 def get_pixel_bit(img,width,pixel_idx,channel_order,permuted_pos):
 	x,y=pixel_idx%width,pixel_idx//width
@@ -97,18 +106,20 @@ def extract_data(img_path,key_str,iv_str,output_file=None):
 	for pos in positions_gen:bits.append(str(get_pixel_bit(img,width,*pos)))
 	hidden_bytes=from_bin(''.join(bits))
 	try:
-		decrypted=decrypt_text(hidden_bytes,key,iv)
+		decrypted_bytes=decrypt_data(hidden_bytes,key,iv)
 		if output_file:
-			if '|' in decrypted:
-				filename,b64_data=decrypted.split('|',1)
-				file_data=b64decode(b64_data)
-				file_ext=splitext(filename)[1].lower()
-				if file_ext in COMPRESSED_EXTS:data=file_data
-				else:data=decompress(file_data)
-				with open(filename,'wb') as f:f.write(data)
-				print(f'file extracted as "{filename}"')
-			else:print(f'error: extracted data is not a file')
-		else:print(f'text: {decrypted}')
+			if b'\x00' in decrypted_bytes:
+				name,data=decrypted_bytes.split(b'\x00',1)
+				fname=name.decode('utf-8')
+				ext=splitext(fname)[1].lower()
+				if ext in COMPRESSED_EXTS:file_data=data
+				else:file_data=decompress(data)
+				with open(fname,'wb') as f:f.write(file_data)
+				print(f'file extracted as "{fname}"')
+			else:print('error: decrypted data is not a file')
+		else:
+			try:print('text:',decrypted_bytes.decode('utf-8'))
+			except:print('error: decrypted bytes not valid utf-8')
 	except Exception as e:print(f'error: could not decrypt - {e}')
 
 def main():
@@ -128,22 +139,25 @@ def main():
 	egroup.add_argument('--text',action='store_true',help='extract as text (default)')
 	egroup.add_argument('--file',action='store_true',help='extract as file')
 	args=parser.parse_args()
+	if len(args.key)!=32:print('error: key must be 32 bytes');return
+	if len(args.iv)!=16:print('error: iv must be 16 bytes');return
+	key,iv=args.key.encode(),args.iv.encode()
 	if args.command=='hide':
+		if args.text and args.file:print('error: cannot use both --text and --file');return
+		if not args.text and not args.file:print('error: specify --text or --file');return
 		if args.file:
-			if not exists(args.file):
-				print(f'error: file "{args.file}" not found')
-				return
+			if not exists(args.file):print(f'error: file "{args.file}" not found');return
 			with open(args.file,'rb') as f:file_data=f.read()
 			filename=basename(args.file)
 			file_ext=splitext(args.file)[1].lower()
-			if file_ext in COMPRESSED_EXTS:b64_data=b64encode(file_data).decode('ascii')
-			else:
-				compressed=compress(file_data)
-				b64_data=b64encode(compressed).decode('ascii')
-			text=f'{filename}|{b64_data}'
-		else:text=args.text
-		hide_data(args.image,args.key,args.iv,text,args.output)
-	else:
+			if file_ext in COMPRESSED_EXTS:compressed=file_data
+			else:compressed=compress(file_data)
+			block=filename.encode('utf-8')+b'\x00'+compressed
+			encrypted=encrypt_data(block,key,iv)
+			_embed_encrypted(encrypted,key,iv,args.image,args.output)
+		else:
+			hide_data(args.image,args.key,args.iv,args.text,args.output)
+	else:	# extract
 		output_file=args.file
 		extract_data(args.image,args.key,args.iv,output_file)
 
