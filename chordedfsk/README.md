@@ -35,7 +35,7 @@ python chordedfsk.py decrypt --key MyNewSecretKeyForAES256Crypto123 --iv InitVec
 python chordedfsk.py decrypt --key MyNewSecretKeyForAES256Crypto123 --iv InitVectorAES16b --input output.flac --file
 ```
 ### Notes
-- Files are automatically compressed before Base64 encoding except for already compressed formats
+- Files are automatically compressed except for already compressed formats
 - FLAC, WAV, and AIFF output formats are supported, but FLAC is recommended for smaller file sizes
 - Please note that this project is not intended for encrypting large files, as the output audio file will be extremely large and will take a long time to process
 - The encrypted hex stream is grouped into chords, where each character is mapped to a permuted note-frequency table. Multiple frequencies are played simultaneously to encode each step

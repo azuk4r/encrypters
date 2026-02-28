@@ -1,8 +1,7 @@
 from numpy import linspace,zeros,zeros_like,sin,pi,concatenate,ones,pad,float32,int16,hanning
 from os.path import basename,splitext,exists
-from base64 import b64encode,b64decode
 from lzma import compress,decompress
-from scipy.fft import rfft,rfftfreq
+from scipy.fft import rfft
 from argparse import ArgumentParser
 from soundfile import SoundFile
 from Crypto.Cipher import AES
@@ -27,18 +26,19 @@ FREQ_MAP=[
 	{'key':'f','note':'D','frequency':1174.66}]
 COMPRESSED_EXTS={'.gz','.zip','.bz2','.7z','.xz','.jpg','.jpeg','.png','.gif','.mp3','.mp4','.pdf'}
 
-def _text(text): yield text
+def _text(text): yield text.encode('utf-8')
 def pad16(b): l=16-(len(b)%16);return b+bytes([l])*l
 def unpad16(b): l=b[-1];return b[:-l] if 1<=l<=16 else b
 def encrypt(b,key,iv): return AES.new(key,AES.MODE_CBC,iv).encrypt(pad16(b))
 def decrypt(b,key,iv): return unpad16(AES.new(key,AES.MODE_CBC,iv).decrypt(b))
-def _hex(it,key,iv): yield from (encrypt(c.encode(),key,iv).hex() for c in it)
+def _hex(it,key,iv): yield from (encrypt(data,key,iv).hex() for data in it)
 
 def _file(path):
 	data=open(path,'rb').read()
 	ext=splitext(path)[1].lower()
 	file_data=data if ext in COMPRESSED_EXTS else compress(data)
-	yield f'{basename(path)}|{b64encode(file_data).decode()}'
+	name=basename(path).encode('utf-8')
+	yield name+b'\x00'+file_data
 
 def permute_freq_map(key:bytes,iv:bytes):
 	seed=int.from_bytes(sha256(key+iv).digest(),'big')
@@ -83,7 +83,6 @@ def save_audio(it,key_dict,out_file):
 				sf.write(w);sf.write(silence)
 
 def analyze_audio(file,f2k,allf,thr=0.05):
-	sr_ref=44100
 	try:
 		with SoundFile(file,'r') as sf:
 			ch,sr=sf.channels,sf.samplerate
@@ -105,14 +104,14 @@ def analyze_audio(file,f2k,allf,thr=0.05):
 def main():
 	p=ArgumentParser(description='encrypt data using aes256-cbc and chorded fsk')
 	sp=p.add_subparsers(dest='command',required=True)
-	s=ArgumentParser(add_help=False)	# shared parser
+	s=ArgumentParser(add_help=False)
 	s.add_argument('--key',required=True,help='aes key (32 characters)')
 	s.add_argument('--iv',required=True,help='initialization vector (16 characters)')
-	e=sp.add_parser('encrypt',parents=[s],help='encrypt text to audio')	# encrypt parser
+	e=sp.add_parser('encrypt',parents=[s],help='encrypt text to audio')
 	e.add_argument('--text',help='text to encrypt')
 	e.add_argument('--file',help='file to encrypt')
 	e.add_argument('--output',required=True,help='output audio file (.flac, .wav or .aiff)')
-	d=sp.add_parser('decrypt',parents=[s],help='decrypt audio to text')	# decrypt parser
+	d=sp.add_parser('decrypt',parents=[s],help='decrypt audio to text')
 	d.add_argument('--input',required=True,help='input audio file')
 	d.add_argument('--file',action='store_true',help='extract as file')
 	a=p.parse_args()
@@ -130,19 +129,27 @@ def main():
 		if not exists(a.input):print('error: input audio does not exist');return
 		chords=analyze_audio(a.input,f2k,allf)
 		hex_buf=''.join(k for c in chords for k in c)
-		try:pt=decrypt(bytes.fromhex(hex_buf),a.key.encode(),a.iv.encode()).decode()
-		except Exception as e:print(f'error: {e}');return
+		try:
+			pt_bytes=decrypt(bytes.fromhex(hex_buf),a.key.encode(),a.iv.encode())
+		except Exception as e:
+			print(f'error: {e}');return
 		if a.file:
-			if '|' in pt:
-				fname,b64d=pt.split('|',1);fdata=b64decode(b64d)
+			if b'\x00' in pt_bytes:
+				name,data=pt_bytes.split(b'\x00',1)
+				fname=name.decode('utf-8')
 				ext=splitext(fname)[1].lower()
 				if ext not in COMPRESSED_EXTS:
-					try:fdata=decompress(fdata)
+					try:data=decompress(data)
 					except:pass
-				with open(fname,'wb') as f:f.write(fdata)
+				with open(fname,'wb') as f:f.write(data)
 				print(f'decypted file extracted: {fname}')
-			else:print('error: decrypted content not a file');print(f'decrypted text extracted: {pt}')
-		else:print(f'decrypted text: {pt}')
+			else:
+				print('error: decrypted content not a file')
+				try:print(f'decrypted text: {pt_bytes.decode("utf-8")}')
+				except:pass
+		else:
+			try:print(f'decrypted text: {pt_bytes.decode("utf-8")}')
+			except:print('error: decrypted bytes are not valid utf-8')
 
 if __name__=='__main__':main()
 	# by azuk4r
