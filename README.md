@@ -2,6 +2,7 @@
 encrypters collection I made
 * [chordedfsk](https://github.com/azuk4r/encrypters/tree/main/chordedfsk): Python script that encrypts data using AES-256-CBC, then encodes the encrypted data as audio using key-based pseudo-random frequency mapping with chorded FSK modulation
 * [lsbstego](https://github.com/azuk4r/encrypters/tree/main/lsbstego): Python script that encrypts data using AES-256-CBC, then hides the encrypted data inside an image's pixels using key-based pseudo-random positions for LSB steganography
+* [zwstego](https://github.com/azuk4r/encrypters/tree/main/zwstego): Python script that encodes data into zero‑width Unicode characters, with optional AES encryption and file support
 ### Disclaimer
 These tools are for educational / personal use only — the author is not responsible for any misuse
 
